@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "libertem-schema"
+description = "Metadata schema for keeping parameters consistent within the LiberTEM ecosystem and link it with other metadata schemas."
+license = {file = "LICENSE"}
+keywords = ["metadata", "LiberTEM", "4D STEM"]
+requires-python = ">=3.7"
+dynamic = ["version", "readme"]
+dependencies = [
+    "typing-extensions",
+    "pint",
+    "pydantic>1,<3"
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Development Status :: 3 - Alpha",
+]
+authors = [
+    {name="Dieter Weber", email="d.weber@fz-juelich.de"},
+]
+
+[project.urls]
+repository = "https://github.com/LiberTEM/LiberTEM-schema"
+
+[project.optional-dependencies]
+test = ["pytest", "pytest-cov"]
+
+[tool.setuptools.dynamic]
+version = {attr = "libertem_schema.__version__"}
+readme = {file = ["README.md"], content-type="text/markdown"}
