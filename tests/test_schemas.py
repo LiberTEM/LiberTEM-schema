@@ -82,7 +82,7 @@ def test_dimensionality():
         )
 
 
-def test_json_1():
+def test_json_dimension():
     params = Simple4DSTEMParams(
         overfocus=0.0015 * ureg.meter,
         scan_pixel_pitch=0.000001 * ureg.meter,
@@ -102,7 +102,7 @@ def test_json_1():
         Simple4DSTEMParams.model_validate(from_j)
 
 
-def test_json_2():
+def test_json_repr():
     params = Simple4DSTEMParams(
         overfocus=0.0015 * ureg.meter,
         scan_pixel_pitch=0.000001 * ureg.meter,
@@ -122,7 +122,7 @@ def test_json_2():
         Simple4DSTEMParams.model_validate(from_j)
 
 
-def test_json_3():
+def test_json_missing():
     params = Simple4DSTEMParams(
         overfocus=0.0015 * ureg.meter,
         scan_pixel_pitch=0.000001 * ureg.meter,
