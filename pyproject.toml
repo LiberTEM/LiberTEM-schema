@@ -30,7 +30,7 @@ authors = [
 repository = "https://github.com/LiberTEM/LiberTEM-schema"
 
 [project.optional-dependencies]
-test = ["pytest", "pytest-cov"]
+test = ["pytest", "pytest-cov", "jsonschema"]
 
 [tool.setuptools.dynamic]
 version = {attr = "libertem_schema.__version__"}
