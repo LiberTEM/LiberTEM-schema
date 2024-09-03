@@ -7,9 +7,6 @@ from pydantic import (
     BaseModel,
     GetCoreSchemaHandler,
     GetJsonSchemaHandler,
-    ValidationError,
-    AfterValidator,
-    BeforeValidator,
     WrapValidator,
     ValidationInfo,
     ValidatorFunctionWrapHandler,
@@ -82,6 +79,7 @@ def _make_handler(dimensionality: str):
     def is_matching(
                 q: Any, handler: ValidatorFunctionWrapHandler, info: ValidationInfo
             ) -> pint.Quantity:
+        # Ensure target type
         if isinstance(q, pint.Quantity):
             pass
         elif isinstance(q, Sequence):
@@ -90,9 +88,10 @@ def _make_handler(dimensionality: str):
             q = m * ureg(u)
         else:
             raise ValueError(f"Don't know how to interpret type {type(q)}.")
-
+        # Check dimension
         if not q.check(dimensionality):
             raise DimensionError(f"Expected dimensionality {dimensionality}, got quantity {q}.")
+        # Return target type
         return q
 
     return is_matching
