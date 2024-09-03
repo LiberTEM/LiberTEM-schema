@@ -7,7 +7,7 @@ name = "libertem-schema"
 description = "Metadata schema for keeping parameters consistent within the LiberTEM ecosystem and link it with other metadata schemas."
 license = {file = "LICENSE"}
 keywords = ["metadata", "LiberTEM", "4D STEM"]
-requires-python = ">=3.7"
+requires-python = ">=3.9"
 dynamic = ["version", "readme"]
 dependencies = [
     "typing-extensions",
@@ -16,8 +16,6 @@ dependencies = [
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.7",
-    "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
