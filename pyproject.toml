@@ -12,7 +12,9 @@ dynamic = ["version", "readme"]
 dependencies = [
     "typing-extensions",
     "pint",
-    "pydantic>1,<3"
+    "pydantic>1,<3",
+    "numpy",
+    "numpydantic",
 ]
 classifiers = [
     "Programming Language :: Python :: 3",

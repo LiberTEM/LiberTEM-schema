@@ -4,12 +4,15 @@ import json
 import jsonschema.exceptions
 import pytest
 import jsonschema
+import numpy as np
 
 from pint import UnitRegistry, Quantity
 from pydantic_core import from_json
-from pydantic import ValidationError
+from pydantic import ValidationError, BaseModel
 
-from libertem_schema import Simple4DSTEMParams
+from numpydantic import Shape
+
+from libertem_schema import Simple4DSTEMParams, Length, LengthArray
 
 ureg = UnitRegistry()
 
@@ -90,6 +93,99 @@ def test_carrots():
             flip_y=False,
             cy=(32 - 2) * ureg.pixel,
             cx=(32 - 2) * ureg.pixel,
+        )
+
+
+def test_nocast():
+    class T1(BaseModel):
+        t: Length[int]
+
+    with pytest.raises(ValidationError):
+        t1 = T1(t=Quantity(0.3, 'm'))
+
+    class T2(BaseModel):
+        t: LengthArray[Shape['2 x, 2 y'], int]
+
+    with pytest.raises(ValidationError):
+        t2 = T2(t=Quantity(
+            np.array([(1, 2), (3, 4)]).astype(float),
+            'm'
+        ))
+
+
+def test_json_nocast():
+    class T1(BaseModel):
+        t: Length[int]
+
+    params = T1(t=Quantity(1, 'm'))
+    
+    json_schema = params.model_json_schema()
+    pprint.pprint(json_schema)
+    as_json = params.model_dump_json()
+    pprint.pprint(as_json)
+    loaded = json.loads(as_json)
+    loaded['t'][0] = 0.3
+
+    with pytest.raises(jsonschema.exceptions.ValidationError):
+        jsonschema.validate(
+            instance=loaded,
+            schema=json_schema
+        )
+
+    class T2(BaseModel):
+        t: LengthArray[Shape['2 x, 2 y'], int]
+
+    params = T2(t=Quantity(
+        np.array([(1, 2), (3, 4)]),
+        'm'
+    ))
+
+    json_schema = params.model_json_schema()
+    pprint.pprint(json_schema)
+    as_json = params.model_dump_json()
+    pprint.pprint(as_json)
+    loaded = json.loads(as_json)
+    loaded['t'][0] = [[0.3, 0.4], [0.5, 0.6]]
+
+    with pytest.raises(jsonschema.exceptions.ValidationError):
+        jsonschema.validate(
+            instance=loaded,
+            schema=json_schema
+        )
+
+
+def test_shape():
+    class T(BaseModel):
+        t: LengthArray[Shape['2 x, 2 y'], complex]
+
+    with pytest.raises(ValidationError):
+        t = T(t=Quantity(
+            # Shape mismatch
+            np.array([(1, 2), (3, 4), (5, 6)]).astype(float),
+            'm'
+        ))
+
+
+def test_json_shape():
+    class T2(BaseModel):
+        t: LengthArray[Shape['2 x, 2 y'], int]
+
+    params = T2(t=Quantity(
+        np.array([(1, 2), (3, 4)]),
+        'm'
+    ))
+
+    json_schema = params.model_json_schema()
+    pprint.pprint(json_schema)
+    as_json = params.model_dump_json()
+    pprint.pprint(as_json)
+    loaded = json.loads(as_json)
+    loaded['t'][0] = [[1, 2], [3, 4], [5, 6]]
+
+    with pytest.raises(jsonschema.exceptions.ValidationError):
+        jsonschema.validate(
+            instance=loaded,
+            schema=json_schema
         )
 
 
@@ -249,8 +345,6 @@ def test_json_schema_missing():
         )
 
 
-# No dimensionality check in JSON Schema yet
-@pytest.mark.xfail
 def test_json_schema_dim():
     params = Simple4DSTEMParams(
         overfocus=0.0015 * ureg.meter,
