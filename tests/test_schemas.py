@@ -189,15 +189,11 @@ def test_json_shape():
         )
 
 
-def test_dtypes():
+def test_dtype():
     class T(BaseModel):
-        t: LengthArray[Shape['2 x, 2 y'], np.complex128]
+        t: Length[np.complex128]
 
-    t = T(t=Quantity(
-        # Shape mismatch
-        np.array([(1, 2), (3, 4)]),
-        'm'
-    ))
+    t = T(t=Quantity(23,'m'))
 
 
 def test_dimensionality():

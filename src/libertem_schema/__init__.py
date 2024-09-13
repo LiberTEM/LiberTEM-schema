@@ -38,8 +38,12 @@ def to_array_tuple(q: pint.Quantity, info: ValidationInfo, array_serializer: Cal
 
 def get_basic_type(t):
     if isinstance(t, Sequence) and not isinstance(t, str):
-        # numpydantic.dtype.Float is a sequence, for example
-        # They all map to the same basic Python type
+        # numpydantic.dtype.Float is a sequence, for example They all map to the
+        # same basic Python type
+
+        # FIXME for some reason they don't work:
+        # TypeError: Too many parameters for <class
+        # 'libertem_schema._make_type.<locals>.Single'>; actual 5, expected 1
         t = t[0]
     if t in (float, int, complex):
         return t
