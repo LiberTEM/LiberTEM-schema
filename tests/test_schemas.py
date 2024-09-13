@@ -189,6 +189,17 @@ def test_json_shape():
         )
 
 
+def test_dtypes():
+    class T(BaseModel):
+        t: LengthArray[Shape['2 x, 2 y'], np.complex128]
+
+    t = T(t=Quantity(
+        # Shape mismatch
+        np.array([(1, 2), (3, 4)]),
+        'm'
+    ))
+
+
 def test_dimensionality():
     with pytest.raises(ValidationError):
         Simple4DSTEMParams(
