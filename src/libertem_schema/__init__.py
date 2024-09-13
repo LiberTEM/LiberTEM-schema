@@ -1,7 +1,7 @@
 from typing import Any, Sequence, Callable
 import functools
 
-from typing_extensions import TypeVar
+from typing_extensions import TypeVar, Generic
 
 import numpydantic
 import numpy as np
@@ -66,7 +66,7 @@ def _make_type(reference: pint.Quantity):
     DType = TypeVar('DType')
     Shape = TypeVar('Shape')
 
-    class Single[DType](pint.Quantity):
+    class Single(pint.Quantity, Generic[DType]):
         @classmethod
         def __get_pydantic_core_schema__(
             cls,
@@ -115,7 +115,7 @@ def _make_type(reference: pint.Quantity):
                 ),
             )
 
-    class Array[Shape, DType](pint.Quantity):
+    class Array(pint.Quantity, Generic[Shape, DType]):
         @classmethod
         def __get_pydantic_core_schema__(
             cls,
