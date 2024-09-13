@@ -37,9 +37,7 @@ def to_array_tuple(q: pint.Quantity, info: ValidationInfo, array_serializer: Cal
 
 
 def get_basic_type(t):
-    if isinstance(t, str):
-        t = np.dtype(t)
-    if isinstance(t, Sequence):
+    if isinstance(t, Sequence) and not isinstance(t, str):
         # numpydantic.dtype.Float is a sequence, for example
         # They all map to the same basic Python type
         t = t[0]
