@@ -28,7 +28,7 @@ class DimensionError(ValueError):
 
 def to_tuple(q: pint.Quantity):
     base = q.to_base_units()
-    return (float(base.magnitude), str(base.units))
+    return (base.magnitude, str(base.units))
 
 
 def to_array_tuple(q: pint.Quantity, info: ValidationInfo, array_serializer: Callable):

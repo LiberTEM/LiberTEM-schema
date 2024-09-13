@@ -300,6 +300,74 @@ def test_json_schema_smoke():
     assert tuple(loaded['overfocus']) == (0.0015, 'meter')
 
 
+def test_json_schema_array():
+    class T(BaseModel):
+        t: LengthArray[Shape['2 x, 2 y'], float]
+
+    params = T(t=Quantity(
+        np.array([
+            (1, 2),
+            (3, 4)
+        ]),
+        'cm'
+    ))
+    json_schema = params.model_json_schema()
+    pprint.pprint(json_schema)
+    as_json = params.model_dump_json()
+    pprint.pprint(as_json)
+    loaded = json.loads(as_json)
+    jsonschema.validate(
+        instance=loaded,
+        schema=json_schema
+    )
+
+@pytest.mark.xfail
+def test_json_schema_complex_array():
+    '''
+    No native support for complex numbers in JSON
+    '''
+    class T(BaseModel):
+        t: LengthArray[Shape['2 x, 2 y'], complex]
+
+    params = T(t=Quantity(
+        np.array([
+            (1, 2),
+            (3, 4)
+        ]),
+        'cm'
+    ))
+    json_schema = params.model_json_schema()
+    pprint.pprint(json_schema)
+    as_json = params.model_dump_json()
+    pprint.pprint(as_json)
+    loaded = json.loads(as_json)
+    jsonschema.validate(
+        instance=loaded,
+        schema=json_schema
+    )
+
+
+@pytest.mark.xfail
+def test_json_schema_complex():
+    '''
+    No native support for complex numbers in JSON
+    '''
+    class T(BaseModel):
+        t: Length[complex]
+
+    params = T(t=Quantity(1, 'cm'))
+    json_schema = params.model_json_schema()
+    pprint.pprint(json_schema)
+    as_json = params.model_dump_json()
+    pprint.pprint(as_json)
+    loaded = json.loads(as_json)
+    jsonschema.validate(
+        instance=loaded,
+        schema=json_schema
+    )
+
+
+
 def test_json_schema_repr():
     params = Simple4DSTEMParams(
         overfocus=0.0015 * ureg.meter,
