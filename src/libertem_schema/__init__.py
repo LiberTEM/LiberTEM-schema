@@ -1,7 +1,7 @@
-from typing import Any, Sequence, Callable
+from typing import Any, Sequence, Callable, Union
 import functools
 
-from typing_extensions import TypeVar, Generic
+from typing_extensions import TypeVar, Generic, get_args, get_origin, Annotated
 
 import numpydantic
 import numpy as np
@@ -11,7 +11,9 @@ from pydantic import (
     BaseModel,
     GetCoreSchemaHandler,
     ValidationInfo,
+    TypeAdapter
 )
+from pydantic.errors import PydanticSchemaGenerationError
 
 import pint
 
@@ -26,13 +28,13 @@ class DimensionError(ValueError):
 
 
 
-def to_tuple(q: pint.Quantity):
-    base = q.to_base_units()
+def to_tuple(q: pint.Quantity, base_units: pint.Unit):
+    base = q.to(base_units)
     return (base.magnitude, str(base.units))
 
 
-def to_array_tuple(q: pint.Quantity, info: ValidationInfo, array_serializer: Callable):
-    base = q.to_base_units()
+def to_array_tuple(q: pint.Quantity, info: ValidationInfo, base_units: pint.Unit, array_serializer: Callable):
+    base = q.to(base_units)
     return (array_serializer(base.magnitude, info=info), str(base.units))
 
 
@@ -45,6 +47,12 @@ def get_basic_type(t):
         # TypeError: Too many parameters for <class
         # 'libertem_schema._make_type.<locals>.Single'>; actual 5, expected 1
         t = t[0]
+    origin = get_origin(t)
+    if origin is not None and issubclass(origin, Annotated):
+        args = get_args(t)
+        # First argument is the bas type
+        t = args[0]
+
     if t in (float, int, complex):
         return t
     dtype = np.dtype(t)
@@ -63,7 +71,7 @@ def get_schema(t):
         raise NotImplementedError(t)
 
 
-def _make_type(reference: pint.Quantity):
+def make_type(reference: pint.Quantity):
 
     DType = TypeVar('DType')
     Shape = TypeVar('Shape')
@@ -77,8 +85,12 @@ def _make_type(reference: pint.Quantity):
         ) -> core_schema.CoreSchema:
             (dtype, ) = _source_type.__args__
             magnitude_schema = get_schema(dtype)
-            units = str(reference.to_base_units().units)
-            validate_function = numpydantic.schema.get_validate_interface(Any, dtype)
+            units = str(reference.units)
+            try:
+                adapter = TypeAdapter(dtype)
+                validate_function = adapter.validate_python
+            except PydanticSchemaGenerationError as e:
+                validate_function = numpydantic.schema.get_validate_interface(Any, dtype)
             target_type = get_basic_type(dtype)
 
             def validator(v: Any, info: ValidationInfo) -> pint.Quantity:
@@ -86,7 +98,7 @@ def _make_type(reference: pint.Quantity):
                     pass
                 elif isinstance(v, Sequence):
                     magnitude, unit = v
-                    v = pint.Quantity(magnitude, unit)
+                    v = pint.Quantity(value=magnitude, units=unit)
                 else:
                     raise ValueError(f"Don't know how to interpret type {type(v)}.")
                 # Check dimension
@@ -113,7 +125,7 @@ def _make_type(reference: pint.Quantity):
                 json_schema=json_schema,
                 python_schema=core_schema.with_info_plain_validator_function(validator),
                 serialization=core_schema.plain_serializer_function_ser_schema(
-                    to_tuple
+                    functools.partial(to_tuple, base_units=reference.units)
                 ),
             )
 
@@ -141,7 +153,7 @@ def _make_type(reference: pint.Quantity):
                 elif isinstance(v, Sequence):
                     magnitude, unit = v
                     # Turn into Quantity: magnitude * unit
-                    v = pint.Quantity(magnitude=np.asarray(magnitude), unit=unit)
+                    v = pint.Quantity(value=np.asarray(magnitude), units=unit)
                 else:
                     raise ValueError(f"Don't know how to interpret type {type(v)}.")
                 # Check dimension
@@ -165,7 +177,11 @@ def _make_type(reference: pint.Quantity):
                 core_schema.literal_schema([units])
             ])
 
-            serializer = functools.partial(to_array_tuple, array_serializer=magnitude_schema['serialization']['function'])
+            serializer = functools.partial(
+                to_array_tuple,
+                base_units=reference.units,
+                array_serializer=magnitude_schema['serialization']['function']
+            )
             return core_schema.json_or_python_schema(
                 json_schema=json_schema,
                 python_schema=core_schema.with_info_plain_validator_function(validator),
@@ -177,9 +193,11 @@ def _make_type(reference: pint.Quantity):
 
     return Single, Array
 
-Length, LengthArray = _make_type(pint.Quantity(1, 'meter'))
-Angle, AngleArray = _make_type(pint.Quantity(1, 'radian'))
-Pixel, PixelArray = _make_type(pint.Quantity(1, 'pixel'))
+
+Length, LengthArray = make_type(pint.Quantity(1, 'meter'))
+Angle, AngleArray = make_type(pint.Quantity(1, 'radian'))
+Pixel, PixelArray = make_type(pint.Quantity(1, 'pixel'))
+
 
 class Simple4DSTEMParams(BaseModel):
     '''

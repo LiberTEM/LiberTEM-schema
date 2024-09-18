@@ -6,13 +6,15 @@ import pytest
 import jsonschema
 import numpy as np
 
+from typing_extensions import Annotated, get_origin
 from pint import UnitRegistry, Quantity
 from pydantic_core import from_json
-from pydantic import ValidationError, BaseModel
+from pydantic import ValidationError, BaseModel, PositiveFloat, Field
 
 from numpydantic import Shape
+import numpydantic.dtype
 
-from libertem_schema import Simple4DSTEMParams, Length, LengthArray
+from libertem_schema import Simple4DSTEMParams, Length, LengthArray, make_type
 
 ureg = UnitRegistry()
 
@@ -444,3 +446,75 @@ def test_json_schema_dim():
             instance=loaded,
             schema=json_schema
         )
+
+
+@pytest.mark.parametrize(
+    "dtype", (
+        float,
+        numpydantic.dtype.Float,
+        Annotated[float, Field(strict=False, gt=0)],
+        np.float64,
+        PositiveFloat
+    )
+)
+@pytest.mark.parametrize(
+    "array", (True, False)
+)
+def test_dtypes(dtype, array):
+    if dtype is numpydantic.dtype.Float:
+            pytest.xfail(
+                "FIXME find out how the numpydantic generic types can be integrated, "
+                "can't use them as argument as of now"
+            )
+    if array:
+        origin = get_origin(dtype)
+        if origin is not None and issubclass(origin, Annotated):
+            pytest.xfail("FIXME make arrays and pydantic types compatible, somehow.")
+
+        class T(BaseModel):
+            t: LengthArray[Shape['2 x, 2 y'], dtype]
+
+        t = T(t=Quantity(
+            np.array([(1., 2.), (3., 4.)]),
+            'm'
+        ))
+    else:
+        class T(BaseModel):
+            t: Length[dtype]
+
+        t = T(t=Quantity(0.3, 'm'))
+
+    json_schema = t.model_json_schema()
+    pprint.pprint(json_schema)
+    as_json = t.model_dump_json()
+    pprint.pprint(as_json)
+    t.model_validate_json(as_json)
+    loaded = json.loads(as_json)
+    t.model_validate(loaded)
+    jsonschema.validate(
+        instance=loaded,
+        schema=json_schema
+    )
+
+
+def test_other_unit():
+    # we set the base unit to cm
+    Test, TestArray = make_type(Quantity(1, 'cm'))
+
+    class T(BaseModel):
+        t: Test[float]
+
+    t = T(t=Quantity(0.3, 'm'))
+    json_schema = t.model_json_schema()
+    pprint.pprint(json_schema)
+    as_json = t.model_dump_json()
+    pprint.pprint(as_json)
+    t.model_validate_json(as_json)
+    loaded = json.loads(as_json)
+    assert loaded['t'][0] == 30
+    assert loaded['t'][1] == 'centimeter'
+    t.model_validate(loaded)
+    jsonschema.validate(
+        instance=loaded,
+        schema=json_schema
+    )
