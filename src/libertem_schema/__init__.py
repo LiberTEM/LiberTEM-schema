@@ -89,8 +89,10 @@ def make_type(reference: pint.Quantity):
             try:
                 adapter = TypeAdapter(dtype)
                 validate_function = adapter.validate_python
+                magnitude_schema = adapter.core_schema
             except PydanticSchemaGenerationError as e:
                 validate_function = numpydantic.schema.get_validate_interface(Any, dtype)
+                magnitude_schema = get_schema(dtype)
             target_type = get_basic_type(dtype)
 
             def validator(v: Any, info: ValidationInfo) -> pint.Quantity:
