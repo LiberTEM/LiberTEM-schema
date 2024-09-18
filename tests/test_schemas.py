@@ -501,19 +501,38 @@ def test_other_unit():
     # we set the base unit to cm
     Test, TestArray = make_type(Quantity(1, 'cm'))
 
-    class T(BaseModel):
+    class T1(BaseModel):
         t: Test[float]
 
-    t = T(t=Quantity(0.3, 'm'))
-    json_schema = t.model_json_schema()
+    class T2(BaseModel):
+        t: TestArray[Shape['2 x, 2 y'], float]
+
+
+    t1 = T1(t=Quantity(0.3, 'm'))
+    json_schema = t1.model_json_schema()
     pprint.pprint(json_schema)
-    as_json = t.model_dump_json()
+    as_json = t1.model_dump_json()
     pprint.pprint(as_json)
-    t.model_validate_json(as_json)
+    t1.model_validate_json(as_json)
     loaded = json.loads(as_json)
     assert loaded['t'][0] == 30
     assert loaded['t'][1] == 'centimeter'
-    t.model_validate(loaded)
+    t1.model_validate(loaded)
+    jsonschema.validate(
+        instance=loaded,
+        schema=json_schema
+    )
+
+    t2 = T2(t=Quantity([(0.3, 0.3), (0.3, 0.3)], 'm'))
+    json_schema = t2.model_json_schema()
+    pprint.pprint(json_schema)
+    as_json = t2.model_dump_json()
+    pprint.pprint(as_json)
+    t2.model_validate_json(as_json)
+    loaded = json.loads(as_json)
+    assert loaded['t'][0] == [[30, 30], [30, 30]]
+    assert loaded['t'][1] == 'centimeter'
+    t2.model_validate(loaded)
     jsonschema.validate(
         instance=loaded,
         schema=json_schema

@@ -140,7 +140,7 @@ def make_type(reference: pint.Quantity):
         ) -> core_schema.CoreSchema:
             shape, dtype = _source_type.__args__
             numpydantic_type = numpydantic.NDArray[shape, dtype]
-            units = str(reference.to_base_units().units)
+            units = str(reference.units)
             validate_function = numpydantic.schema.get_validate_interface(shape, dtype)
             target_type = get_basic_type(dtype)
 
