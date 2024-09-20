@@ -77,6 +77,8 @@ Shape = TypeVar('Shape')
 
 
 class Single(pint.Quantity, Generic[DType]):
+    reference: pint.Quantity
+
     @classmethod
     def __get_pydantic_core_schema__(
         cls,
@@ -135,6 +137,8 @@ class Single(pint.Quantity, Generic[DType]):
 
 
 class Array(pint.Quantity, Generic[Shape, DType]):
+    reference: pint.Quantity
+
     @classmethod
     def __get_pydantic_core_schema__(
         cls,
@@ -205,27 +209,27 @@ _pixel = pint.Quantity(1, 'pixel')
 
 
 class Length(Single, Generic[DType]):
-    reference: pint.Quantity = _length
+    reference = _length
 
 
 class LengthArray(Array, Generic[Shape, DType]):
-    reference: pint.Quantity = _length
+    reference = _length
 
 
 class Angle(Single, Generic[DType]):
-    reference: pint.Quantity = _angle
+    reference = _angle
 
 
 class AngleArray(Array, Generic[Shape, DType]):
-    reference: pint.Quantity = _angle
+    reference = _angle
 
 
 class Pixel(Single, Generic[DType]):
-    reference: pint.Quantity = _pixel
+    reference = _pixel
 
 
 class PixelArray(Array, Generic[Shape, DType]):
-    reference: pint.Quantity = _pixel
+    reference = _pixel
 
 
 class Simple4DSTEMParams(BaseModel):
