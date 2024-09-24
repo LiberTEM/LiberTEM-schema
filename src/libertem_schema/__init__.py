@@ -1,5 +1,7 @@
 from typing import Any, Sequence, Callable
+from types import UnionType
 import functools
+from pprint import pprint
 
 from typing_extensions import TypeVar, Generic, get_args, get_origin, Annotated
 
@@ -40,6 +42,9 @@ def to_array_tuple(
 
 
 def get_basic_type(t):
+    if get_origin(t) is UnionType:
+        # turn into a sequence of types
+        t = get_args(t)
     if isinstance(t, Sequence) and not isinstance(t, str):
         # numpydantic.dtype.Float is a sequence, for example They all map to the
         # same basic Python type
@@ -47,17 +52,16 @@ def get_basic_type(t):
         # FIXME for some reason they don't work:
         # TypeError: Too many parameters for <class
         # 'libertem_schema._make_type.<locals>.Single'>; actual 5, expected 1
-        t = t[0]
+        t = np.result_type(*t)
     origin = get_origin(t)
     if origin is not None and issubclass(origin, Annotated):
         args = get_args(t)
-        # First argument is the bas type
+        # First argument is the base type
         t = args[0]
 
-    if t in (float, int, complex):
-        return t
     dtype = np.dtype(t)
-    return numpydantic.maps.np_to_python[dtype.type]
+    result = numpydantic.maps.np_to_python[dtype.type]
+    return result
 
 
 def get_schema(t):
@@ -86,7 +90,6 @@ class Single(pint.Quantity, Generic[DType]):
         _handler: GetCoreSchemaHandler,
     ) -> core_schema.CoreSchema:
         (dtype, ) = _source_type.__args__
-        magnitude_schema = get_schema(dtype)
         units = str(cls.reference.units)
         try:
             adapter = TypeAdapter(dtype)
@@ -156,6 +159,11 @@ class Array(pint.Quantity, Generic[Shape, DType]):
             _handler=_handler
         )
 
+        magnitude_json_schema = numpydantic_type.__get_pydantic_json_schema__(
+            schema=magnitude_schema,
+            handler=_handler
+        )
+
         def validator(v: Any, info: core_schema.ValidationInfo) -> pint.Quantity:
             if isinstance(v, pint.Quantity):
                 pass
@@ -183,9 +191,12 @@ class Array(pint.Quantity, Generic[Shape, DType]):
             # Return target type
             return v
 
+        #pprint(magnitude_json_schema)
+        if 'dtype' in magnitude_json_schema:
+            del magnitude_json_schema['dtype']
         json_schema = core_schema.tuple_positional_schema(items_schema=[
-            magnitude_schema['json_schema'],
-            core_schema.literal_schema([units])
+            magnitude_json_schema,
+            core_schema.literal_schema([units]),
         ])
 
         serializer = functools.partial(

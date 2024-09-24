@@ -6,10 +6,10 @@ import pytest
 import jsonschema
 import numpy as np
 
-from typing_extensions import Annotated, get_origin, Generic
+from typing_extensions import Annotated, get_origin, Generic, Union
 from pint import UnitRegistry, Quantity
 from pydantic_core import from_json
-from pydantic import ValidationError, BaseModel, PositiveFloat, Field
+from pydantic import ValidationError, BaseModel, PositiveFloat, Field, ConfigDict
 
 from numpydantic import Shape
 import numpydantic.dtype
@@ -455,13 +455,15 @@ def test_json_schema_dim():
         numpydantic.dtype.Float,
         Annotated[float, Field(strict=False, gt=0)],
         np.float64,
-        PositiveFloat
+        PositiveFloat,
+        numpydantic.dtype.Float32 | numpydantic.dtype.Float64
     )
 )
 @pytest.mark.parametrize(
     "array", (True, False)
 )
 def test_dtypes(dtype, array):
+    print(dtype, array)
     if dtype is numpydantic.dtype.Float:
         pytest.xfail(
             "FIXME find out how the numpydantic generic types can be integrated, "
