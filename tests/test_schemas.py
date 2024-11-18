@@ -4,12 +4,19 @@ import json
 import jsonschema.exceptions
 import pytest
 import jsonschema
+import numpy as np
 
+from typing_extensions import Annotated, get_origin, Generic, Union
 from pint import UnitRegistry, Quantity
 from pydantic_core import from_json
-from pydantic import ValidationError
+from pydantic import ValidationError, BaseModel, PositiveFloat, Field, ConfigDict
 
-from libertem_schema import Simple4DSTEMParams
+from numpydantic import Shape
+import numpydantic.dtype
+
+from libertem_schema import (
+    Simple4DSTEMParams, Length, LengthArray, Single, Array, DType as DType_TVar, Shape as Shape_TVar
+)
 
 ureg = UnitRegistry()
 
@@ -91,6 +98,105 @@ def test_carrots():
             cy=(32 - 2) * ureg.pixel,
             cx=(32 - 2) * ureg.pixel,
         )
+
+
+def test_nocast():
+    class T1(BaseModel):
+        t: Length[int]
+
+    with pytest.raises(ValidationError):
+        T1(t=Quantity(0.3, 'm'))
+
+    class T2(BaseModel):
+        t: LengthArray[Shape['2 x, 2 y'], int]
+
+    with pytest.raises(ValidationError):
+        T2(t=Quantity(
+            np.array([(1, 2), (3, 4)]).astype(float),
+            'm'
+        ))
+
+
+def test_json_nocast():
+    class T1(BaseModel):
+        t: Length[int]
+
+    params = T1(t=Quantity(1, 'm'))
+    json_schema = params.model_json_schema()
+    pprint.pprint(json_schema)
+    as_json = params.model_dump_json()
+    pprint.pprint(as_json)
+    loaded = json.loads(as_json)
+    loaded['t'][0] = 0.3
+
+    with pytest.raises(jsonschema.exceptions.ValidationError):
+        jsonschema.validate(
+            instance=loaded,
+            schema=json_schema
+        )
+
+    class T2(BaseModel):
+        t: LengthArray[Shape['2 x, 2 y'], int]
+
+    params = T2(t=Quantity(
+        np.array([(1, 2), (3, 4)]),
+        'm'
+    ))
+
+    json_schema = params.model_json_schema()
+    pprint.pprint(json_schema)
+    as_json = params.model_dump_json()
+    pprint.pprint(as_json)
+    loaded = json.loads(as_json)
+    loaded['t'][0] = [[0.3, 0.4], [0.5, 0.6]]
+
+    with pytest.raises(jsonschema.exceptions.ValidationError):
+        jsonschema.validate(
+            instance=loaded,
+            schema=json_schema
+        )
+
+
+def test_shape():
+    class T(BaseModel):
+        t: LengthArray[Shape['2 x, 2 y'], complex]
+
+    with pytest.raises(ValidationError):
+        T(t=Quantity(
+            # Shape mismatch
+            np.array([(1, 2), (3, 4), (5, 6)]).astype(float),
+            'm'
+        ))
+
+
+def test_json_shape():
+    class T2(BaseModel):
+        t: LengthArray[Shape['2 x, 2 y'], int]
+
+    params = T2(t=Quantity(
+        np.array([(1, 2), (3, 4)]),
+        'm'
+    ))
+
+    json_schema = params.model_json_schema()
+    pprint.pprint(json_schema)
+    as_json = params.model_dump_json()
+    pprint.pprint(as_json)
+    loaded = json.loads(as_json)
+    loaded['t'][0] = [[1, 2], [3, 4], [5, 6]]
+
+    with pytest.raises(jsonschema.exceptions.ValidationError):
+        jsonschema.validate(
+            instance=loaded,
+            schema=json_schema
+        )
+
+
+def test_dtype():
+    class T(BaseModel):
+        t: Length[np.complex128]
+
+    T(t=Quantity(23, 'm'))
 
 
 def test_dimensionality():
@@ -197,6 +303,74 @@ def test_json_schema_smoke():
     assert tuple(loaded['overfocus']) == (0.0015, 'meter')
 
 
+def test_json_schema_array():
+    class T(BaseModel):
+        t: LengthArray[Shape['2 x, 2 y'], float]
+
+    params = T(t=Quantity(
+        np.array([
+            (1, 2),
+            (3, 4)
+        ]),
+        'cm'
+    ))
+    json_schema = params.model_json_schema()
+    pprint.pprint(json_schema)
+    as_json = params.model_dump_json()
+    pprint.pprint(as_json)
+    loaded = json.loads(as_json)
+    jsonschema.validate(
+        instance=loaded,
+        schema=json_schema
+    )
+
+
+@pytest.mark.xfail
+def test_json_schema_complex_array():
+    '''
+    No native support for complex numbers in JSON
+    '''
+    class T(BaseModel):
+        t: LengthArray[Shape['2 x, 2 y'], complex]
+
+    params = T(t=Quantity(
+        np.array([
+            (1, 2),
+            (3, 4)
+        ]),
+        'cm'
+    ))
+    json_schema = params.model_json_schema()
+    pprint.pprint(json_schema)
+    as_json = params.model_dump_json()
+    pprint.pprint(as_json)
+    loaded = json.loads(as_json)
+    jsonschema.validate(
+        instance=loaded,
+        schema=json_schema
+    )
+
+
+@pytest.mark.xfail
+def test_json_schema_complex():
+    '''
+    No native support for complex numbers in JSON
+    '''
+    class T(BaseModel):
+        t: Length[complex]
+
+    params = T(t=Quantity(1, 'cm'))
+    json_schema = params.model_json_schema()
+    pprint.pprint(json_schema)
+    as_json = params.model_dump_json()
+    pprint.pprint(as_json)
+    loaded = json.loads(as_json)
+    jsonschema.validate(
+        instance=loaded,
+        schema=json_schema
+    )
+
+
 def test_json_schema_repr():
     params = Simple4DSTEMParams(
         overfocus=0.0015 * ureg.meter,
@@ -249,8 +423,6 @@ def test_json_schema_missing():
         )
 
 
-# No dimensionality check in JSON Schema yet
-@pytest.mark.xfail
 def test_json_schema_dim():
     params = Simple4DSTEMParams(
         overfocus=0.0015 * ureg.meter,
@@ -275,3 +447,104 @@ def test_json_schema_dim():
             instance=loaded,
             schema=json_schema
         )
+
+
+@pytest.mark.parametrize(
+    "dtype", (
+        float,
+        numpydantic.dtype.Float,
+        Annotated[float, Field(strict=False, gt=0)],
+        np.float64,
+        PositiveFloat,
+        numpydantic.dtype.Float32 | numpydantic.dtype.Float64
+    )
+)
+@pytest.mark.parametrize(
+    "array", (True, False)
+)
+def test_dtypes(dtype, array):
+    print(dtype, array)
+    if dtype is numpydantic.dtype.Float:
+        pytest.xfail(
+            "FIXME find out how the numpydantic generic types can be integrated, "
+            "can't use them as argument as of now"
+        )
+    if array:
+        origin = get_origin(dtype)
+        if origin is not None and issubclass(origin, Annotated):
+            pytest.xfail("FIXME make arrays and pydantic types compatible, somehow.")
+
+        class T(BaseModel):
+            t: LengthArray[Shape['2 x, 2 y'], dtype]
+
+        t = T(t=Quantity(
+            np.array([(1., 2.), (3., 4.)]),
+            'm'
+        ))
+    else:
+        class T(BaseModel):
+            t: Length[dtype]
+
+        t = T(t=Quantity(0.3, 'm'))
+
+    json_schema = t.model_json_schema()
+    pprint.pprint(json_schema)
+    as_json = t.model_dump_json()
+    pprint.pprint(as_json)
+    t.model_validate_json(as_json)
+    loaded = json.loads(as_json)
+    t.model_validate(loaded)
+    jsonschema.validate(
+        instance=loaded,
+        schema=json_schema
+    )
+
+
+# we set the base unit to cm
+_cm = Quantity(1, 'cm')
+
+
+class Cm(Single, Generic[DType_TVar]):
+    reference = _cm
+
+
+class CmArray(Array, Generic[Shape_TVar, DType_TVar]):
+    reference = _cm
+
+
+def test_other_unit():
+    class T1(BaseModel):
+        t: Cm[float]
+
+    class T2(BaseModel):
+        t: CmArray[Shape['2 x, 2 y'], float]
+
+    t1 = T1(t=Quantity(0.3, 'm'))
+    json_schema = t1.model_json_schema()
+    pprint.pprint(json_schema)
+    as_json = t1.model_dump_json()
+    pprint.pprint(as_json)
+    t1.model_validate_json(as_json)
+    loaded = json.loads(as_json)
+    assert loaded['t'][0] == 30
+    assert loaded['t'][1] == 'centimeter'
+    t1.model_validate(loaded)
+    jsonschema.validate(
+        instance=loaded,
+        schema=json_schema
+    )
+
+    t2 = T2(t=Quantity([(0.3, 0.3), (0.3, 0.3)], 'm'))
+    json_schema = t2.model_json_schema()
+    pprint.pprint(json_schema)
+    as_json = t2.model_dump_json()
+    pprint.pprint(as_json)
+    t2.model_validate_json(as_json)
+    loaded = json.loads(as_json)
+    assert loaded['t'][0] == [[30, 30], [30, 30]]
+    assert loaded['t'][1] == 'centimeter'
+    t2.model_validate(loaded)
+    jsonschema.validate(
+        instance=loaded,
+        schema=json_schema
+    )
