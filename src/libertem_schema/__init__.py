@@ -1,14 +1,21 @@
-from typing import Any, Sequence
+from typing import Any, Sequence, Callable
+from types import UnionType
+import functools
+from pprint import pprint
 
-from typing_extensions import Annotated
+from typing_extensions import TypeVar, Generic, get_args, get_origin, Annotated
+
+import numpydantic
+import numpy as np
+
 from pydantic_core import core_schema
 from pydantic import (
     BaseModel,
     GetCoreSchemaHandler,
-    WrapValidator,
     ValidationInfo,
-    ValidatorFunctionWrapHandler,
+    TypeAdapter
 )
+from pydantic.errors import PydanticSchemaGenerationError
 
 import pint
 
@@ -22,69 +29,218 @@ class DimensionError(ValueError):
     pass
 
 
-_pint_base_repr = core_schema.tuple_positional_schema(items_schema=[
-    core_schema.float_schema(),
-    core_schema.str_schema()
-])
+def to_tuple(q: pint.Quantity, base_units: pint.Unit):
+    base = q.to(base_units)
+    return (base.magnitude, str(base.units))
 
 
-def to_tuple(q: pint.Quantity):
-    base = q.to_base_units()
-    return (float(base.magnitude), str(base.units))
+def to_array_tuple(
+        q: pint.Quantity, info: ValidationInfo,
+        base_units: pint.Unit, array_serializer: Callable):
+    base = q.to(base_units)
+    return (array_serializer(base.magnitude, info=info), str(base.units))
 
 
-class PintAnnotation:
+def get_basic_type(t):
+    if get_origin(t) is UnionType:
+        # turn into a sequence of types
+        t = get_args(t)
+    if isinstance(t, Sequence) and not isinstance(t, str):
+        # numpydantic.dtype.Float is a sequence, for example They all map to the
+        # same basic Python type
+
+        # FIXME for some reason they don't work:
+        # TypeError: Too many parameters for <class
+        # 'libertem_schema._make_type.<locals>.Single'>; actual 5, expected 1
+        t = np.result_type(*t)
+    origin = get_origin(t)
+    if origin is not None and issubclass(origin, Annotated):
+        args = get_args(t)
+        # First argument is the base type
+        t = args[0]
+
+    dtype = np.dtype(t)
+    result = numpydantic.maps.np_to_python[dtype.type]
+    return result
+
+
+def get_schema(t):
+    basic_type = get_basic_type(t)
+    if basic_type is float:
+        return core_schema.float_schema()
+    elif basic_type is int:
+        return core_schema.int_schema()
+    elif basic_type is complex:
+        return core_schema.complex_schema()
+    else:
+        raise NotImplementedError(t)
+
+
+DType = TypeVar('DType')
+Shape = TypeVar('Shape')
+
+
+class Single(pint.Quantity, Generic[DType]):
+    reference: pint.Quantity
+
     @classmethod
     def __get_pydantic_core_schema__(
         cls,
         _source_type: Any,
         _handler: GetCoreSchemaHandler,
     ) -> core_schema.CoreSchema:
+        (dtype, ) = _source_type.__args__
+        units = str(cls.reference.units)
+        try:
+            adapter = TypeAdapter(dtype)
+            validate_function = adapter.validate_python
+            magnitude_schema = adapter.core_schema
+        except PydanticSchemaGenerationError:
+            validate_function = numpydantic.schema.get_validate_interface(Any, dtype)
+            magnitude_schema = get_schema(dtype)
+        target_type = get_basic_type(dtype)
+
+        def validator(v: Any, info: ValidationInfo) -> pint.Quantity:
+            if isinstance(v, pint.Quantity):
+                pass
+            elif isinstance(v, Sequence):
+                magnitude, unit = v
+                v = pint.Quantity(value=magnitude, units=unit)
+            else:
+                raise ValueError(f"Don't know how to interpret type {type(v)}.")
+            # Check dimension
+            if not v.check(cls.reference.dimensionality):
+                raise DimensionError(
+                    f"Expected dimensionality {cls.reference.dimensionality}, got quantity {v}."
+                )
+            try:
+                # First, try as-is
+                validate_function(v.magnitude)
+            except Exception:
+                # See if we can go from int to float, for example
+                if np.can_cast(type(v.magnitude), target_type):
+                    v = target_type(v.magnitude) * v.units
+                    validate_function(v.magnitude)
+                else:
+                    raise
+            # Return target type
+            return v
+
+        json_schema = core_schema.tuple_positional_schema(items_schema=[
+            magnitude_schema,
+            core_schema.literal_schema([units])
+        ])
         return core_schema.json_or_python_schema(
-            json_schema=_pint_base_repr,
-            python_schema=core_schema.is_instance_schema(pint.Quantity),
+            json_schema=json_schema,
+            python_schema=core_schema.with_info_plain_validator_function(validator),
             serialization=core_schema.plain_serializer_function_ser_schema(
-                to_tuple
+                functools.partial(to_tuple, base_units=cls.reference.units)
             ),
         )
 
 
-_length_dim = ureg.meter.dimensionality
-_angle_dim = ureg.radian.dimensionality
-_pixel_dim = ureg.pixel.dimensionality
+class Array(pint.Quantity, Generic[Shape, DType]):
+    reference: pint.Quantity
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls,
+        _source_type: Any,
+        _handler: GetCoreSchemaHandler,
+    ) -> core_schema.CoreSchema:
+        shape, dtype = _source_type.__args__
+        numpydantic_type = numpydantic.NDArray[shape, dtype]
+        units = str(cls.reference.units)
+        validate_function = numpydantic.schema.get_validate_interface(shape, dtype)
+        target_type = get_basic_type(dtype)
+
+        magnitude_schema = numpydantic_type.__get_pydantic_core_schema__(
+            _source_type=numpydantic_type,
+            _handler=_handler
+        )
+
+        magnitude_json_schema = numpydantic_type.__get_pydantic_json_schema__(
+            schema=magnitude_schema,
+            handler=_handler
+        )
+
+        def validator(v: Any, info: core_schema.ValidationInfo) -> pint.Quantity:
+            if isinstance(v, pint.Quantity):
+                pass
+            elif isinstance(v, Sequence):
+                magnitude, unit = v
+                # Turn into Quantity: magnitude * unit
+                v = pint.Quantity(value=np.asarray(magnitude), units=unit)
+            else:
+                raise ValueError(f"Don't know how to interpret type {type(v)}.")
+            # Check dimension
+            if not v.check(cls.reference.dimensionality):
+                raise DimensionError(
+                    f"Expected dimensionality {cls.dimensionality}, got quantity {v}."
+                )
+            try:
+                # First, try as-is
+                validate_function(v.magnitude)
+            except Exception:
+                # See if we can go from int to float, for example
+                if np.can_cast(v.magnitude, target_type):
+                    v = v.magnitude.astype(target_type) * v.units
+                    validate_function(v.magnitude)
+                else:
+                    raise
+            # Return target type
+            return v
+
+        #pprint(magnitude_json_schema)
+        if 'dtype' in magnitude_json_schema:
+            del magnitude_json_schema['dtype']
+        json_schema = core_schema.tuple_positional_schema(items_schema=[
+            magnitude_json_schema,
+            core_schema.literal_schema([units]),
+        ])
+
+        serializer = functools.partial(
+            to_array_tuple,
+            base_units=cls.reference.units,
+            array_serializer=magnitude_schema['serialization']['function']
+        )
+        return core_schema.json_or_python_schema(
+            json_schema=json_schema,
+            python_schema=core_schema.with_info_plain_validator_function(validator),
+            serialization=core_schema.plain_serializer_function_ser_schema(
+                function=serializer,
+                info_arg=True,
+            ),
+        )
 
 
-def _make_handler(dimensionality: str):
-    def is_matching(
-                q: Any, handler: ValidatorFunctionWrapHandler, info: ValidationInfo
-            ) -> pint.Quantity:
-        # Ensure target type
-        if isinstance(q, pint.Quantity):
-            pass
-        elif isinstance(q, Sequence):
-            magnitude, unit = q
-            # Turn into Quantity: measure * unit
-            q = magnitude * ureg(unit)
-        else:
-            raise ValueError(f"Don't know how to interpret type {type(q)}.")
-        # Check dimension
-        if not q.check(dimensionality):
-            raise DimensionError(f"Expected dimensionality {dimensionality}, got quantity {q}.")
-        # Return target type
-        return q
-
-    return is_matching
+_length = pint.Quantity(1, 'meter')
+_angle = pint.Quantity(1, 'radian')
+_pixel = pint.Quantity(1, 'pixel')
 
 
-Length = Annotated[
-    pint.Quantity, PintAnnotation, WrapValidator(_make_handler(_length_dim))
-]
-Angle = Annotated[
-    pint.Quantity, PintAnnotation, WrapValidator(_make_handler(_angle_dim))
-]
-Pixel = Annotated[
-    pint.Quantity, PintAnnotation, WrapValidator(_make_handler(_pixel_dim))
-]
+class Length(Single, Generic[DType]):
+    reference = _length
+
+
+class LengthArray(Array, Generic[Shape, DType]):
+    reference = _length
+
+
+class Angle(Single, Generic[DType]):
+    reference = _angle
+
+
+class AngleArray(Array, Generic[Shape, DType]):
+    reference = _angle
+
+
+class Pixel(Single, Generic[DType]):
+    reference = _pixel
+
+
+class PixelArray(Array, Generic[Shape, DType]):
+    reference = _pixel
 
 
 class Simple4DSTEMParams(BaseModel):
@@ -96,12 +252,12 @@ class Simple4DSTEMParams(BaseModel):
     and https://arxiv.org/abs/2403.08538
     for the technical details.
     '''
-    overfocus: Length
-    scan_pixel_pitch: Length
-    camera_length: Length
-    detector_pixel_pitch: Length
-    semiconv: Angle
-    cy: Pixel
-    cx: Pixel
-    scan_rotation: Angle
+    overfocus: Length[float]
+    scan_pixel_pitch: Length[float]
+    camera_length: Length[float]
+    detector_pixel_pitch: Length[float]
+    semiconv: Angle[float]
+    cy: Pixel[float]
+    cx: Pixel[float]
+    scan_rotation: Angle[float]
     flip_y: bool
